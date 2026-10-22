@@ -1,0 +1,197 @@
+勉強したいこと
+✅・所有権とその移動
+✅・Option 型と Result 型
+✅・Enum 型
+✅・collection、sliece
+✅・エラー処理
+・thiserror
+✅・trait
+✅Lifetime
+✅構造体
+✅テスト
+・モジュール(7章)
+🚩Box/Rc/RefCell (15章)
+✅クロージャ(13章)
+・並行動作
+・DB 操作
+
+第1小節: Box<T>
+
+1. Box<T> は「ヒープに置く」ための最小のスマートポインタ
+
+let b = Box::new(5);
+*b          // 5   * で中身を取り出す
+*b + 1      // 6
+
+┌─────────────────┬────────────────────┐
+│       型        │ 大きさ（確認済み） │
+├─────────────────┼────────────────────┤
+│ Box<i32>        │ 8 バイト           │
+├─────────────────┼────────────────────┤
+│ Box<[u8; 1000]> │ 8 バイト           │
+├─────────────────┼────────────────────┤
+│ [u8; 1000]      │ 1000 バイト        │
+└─────────────────┴────────────────────┘
+
+スタックに置かれるのはポインタ1つで、中身はヒープにあります。他の言語の new で作った値へのポインタに近いですが、次の点が違います。
+
+- 所有者は1つだけです。Box を別の変数に代入すると move で、元の変数は使えません（E0382、確認済み）。
+- スコープを抜けると、ヒープの中身ごと自動で drop されます。free を書く必要も、GC もありません。
+
+--- スコープ
+  ブロックの中
+  drop: heap value        ← ブロックを抜けた所で、ヒープ上の値の drop が走る
+--- スコープの後
+
+メソッド呼び出しでは、自動で参照が外れます（s.len()、s.to_uppercase() がそのまま使える）。また、Box に限っては、中身を * で move して取り出せます。
+
+let s = Box::new(String::from("hello"));
+let moved: String = *s;          // s は使えなくなる
+
+参照 &T では、この move はできません（スライスの時に見た E0507）。Box は中身を所有しているからです。
+
+2. 使う場面
+
+┌───────────────────────┬─────────────────────────────────────────────────────────────────────┐
+│         場面          │                                理由                                 │
+├───────────────────────┼────────────────────────────────────────┤
+│ 再帰する型            │ 大きさがコンパイル時に決まらない型を、ポインタで包む（この小節の中  │
+│                       │ 心）                                   │
+├───────────────────────┼─────────────────────────────────────────────────────────────────────┤
+│ 大きな値の所有権を渡  │ move は  : Box<[u8; 1000]> の move）   │
+│ す                    │                                                                     │
+├───────────────────────┼────────────────────────────────────────┤
+│ トレイトオブジェクト  │ Box<dyn Shape> や Box<dyn Fn(i32) -> i32>（すでに何度も使ってきた） │
+└───────────────────────┴────────────────────────────────────────┘
+
+最後の1つは、すでに使っています。B は、「dyn Traitの大きさが分からない型なので、ポインタ越しに持つ」でした。再帰型も、まったく同じ理由で Box
+が要ります。
+
+3. 再帰する型
+
+関数型言語なら当たり前の data List、そのまま Rustに書くと通りません。                                                                      
+enum List {                                                                                   Cons(i32, List),
+    Nil,                                                                                  }
+error[E0072]: recursive type `List` has infinite size                                     help: insert some indirection (e.gbreak the cycle
+                                                                                          Cons は i32 と List を持ち、その Lで……と、大きさを計算すると無限になるからです。Haskell では、全ての値が暗黙にヒープ上の thuへのポインタなので、この問題が見えでは、どこにポインタが入るかを明示する必要があります。コンパイラが提案しているとおり、Box を挟みます。
+
+enum List {
+    Cons(i32, Box<List>),
+    Nil,
+}
+use List::{Cons, Nil};
+
+let list = Cons(1, Box::new(Cons(2il))))));
+// Cons(1, Cons(2, Cons(3, Nil)))
+
+fn sum(l: &List) -> i32 {
+    match l {
+        Cons(v, rest) => v + sum(rest),     // rest: &Box<List> が &List に自動変換される
+        Nil => 0,
+    }
+}
+sum(&list)                  // 6
+size_of::<List>()           // 16 別用のタグ、で固定の大きさ）
+
+sum(rest) は、rest の型が &Box<Lis &List に自動変換されます（以前のderef coercion）。
+
+ヒントの & でも輪を断てます（確認済み）が、指す先の所有者が別に必要になります。
+
+enum List<'a> { Cons(i32, &'a List<'a>), Nil }
+let nil = List::Nil;
+let l3 = List::Cons(3, &nil);       // 各ノードを別々の変数が所有する必要がある
+
+実用的な構造では、中身をまるごと所有する Box が、素直な選択です。
+
+4. 実用例: 式の木
+
+関数型言語の代数的データ型の定番、式の木です。
+
+enum Expr {
+    Num(i64),
+    Add(Box<Expr>, Box<Expr>),
+    Mul(Box<Expr>, Box<Expr>),
+    Neg(Box<Expr>),
+}
+use Expr::*;
+
+fn eval(e: &Expr) -> i64 {
+    match e {
+        Num(n) => *n,
+        Add(a, b) => eval(a) + eva
+        Mul(a, b) => eval(a) * eval(b),
+        Neg(a) => -eval(a),
+    }
+}
+
+(1 * (2 + 0)) + -(-(3)) の評価結果
+
+Box の中身を * で move して、木を
+
+eval は借りるだけですが、木を消費 書けます。
+
+fn simplify(e: Expr) -> Expr {
+    match e {
+        Add(a, b) => match (simpli/ *a で Box から中身を move
+            (Num(0), x) | (x, Num(0)) => x,                   // 0 + x = x
+            (x, y) => Add(Box::new
+        },
+        Mul(a, b) => match (simpli
+            (Num(1), x) | (x, Num(1)) => x,                   // 1 * x = x
+            (x, y) => Mul(Box::new
+        },
+        Neg(a) => match simplify(*
+            Neg(inner) => *inner,                              // --x = x
+            x => Neg(Box::new(x)),
+        },
+        n => n,
+    }
+}
+
+元の式が Add(Num(2), Num(3)) に簡  。simplify(*a) の *a が、Boxの中身を move する書き方です。参照 &Expr では不可能で、Box
+を所有しているからこそできます。パ0)) は、「どちらかの側が0」を1つの腕にまとめています。
+
+5. 実用例: 2 分木
+
+struct Node { val: i32, left: Option<Box<Node>>, right: Option<Box<Node>> }
+
+impl Node {
+    fn insert(&mut self, v: i32) {
+        let slot = if v < self.val { &mut self.left } else { &mut self.right };
+        match slot {
+            Some(child) => child.insert(v),
+            None => *slot = Some(B
+        }
+    }
+}
+
+Option<Box<Node>> が、再帰する構造の定型です。None が葉、Some(Box<Node>) が子を表します。5を根に
+[3, 8, 1, 4, 7, 9] を挿入し、通り , 7, 8, 9] でした。
+
+まとめ
+
+- Box<T> は、値をヒープに置き、所  、最小のスマートポインタです。
+- 再帰する型は、Box（など）で間接参照を明示しないと、大きさが無限になって作れません（E0072）。
+- Box<dyn Trait>、Box<dyn Fn> で見
+- Box は、中身を * で move して取り出せる、特別な性質を持っています。
+
+確認問題
+
+実行する前に、結果を予想してください。
+
+// (1) 次のコードの出力は？ drop が走る順序に注目
+struct Noisy(&'static str);
+impl Drop for Noisy { fn drop(&mut self) { println!("drop {}", self.0); } }
+
+let a = Box::new(Noisy("a"));
+let b = Box::new(Noisy("b"));
+let c = a;
+println!("end");
+
+// (2) 次の関数 length は List の プで書き直せるか。
+//     ヒント: `let mut cur = &list;` を付け替えていく。
+fn length(l: &List) -> usize {
+    match l { Cons(_, rest) => 1 + length(rest), Nil => 0 }
+}
+
+答えが分かったら、実行して確かめて

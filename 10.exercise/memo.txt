@@ -1,0 +1,4 @@
+1. Vec<i32> を受け取り、平均値を Option<f64> で返す関数を書く（空なら None）。
+2. 文字列を受け取り、各文字の出現回数を HashMap<char, usize> で数えて、回数の多い順に表示する。
+3. "name=taro, age=20, city=tokyo" を split で分解して、HashMap<String, String> に入れる。
+4. 単語カウンタを作り、引数にファイル名を取る版にする（std::fs::read_to_string を使う。Result と ? の練習になります）。
