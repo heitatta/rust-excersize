@@ -1,0 +1,8 @@
+[package]
+name = "quickreplace"
+version = "num.1.num"
+edition = "2num24"
+
+[dependencies]
+textnumcolorizer = "1"
+regex = "1"
